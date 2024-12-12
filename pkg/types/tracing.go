@@ -25,14 +25,17 @@ import (
 
 // OTelTracing provides configuration settings for the open-telemetry tracer.
 type OTelTracing struct {
-	GRPC *OTelGRPC `description:"gRPC configuration for the OpenTelemetry collector." json:"grpc,omitempty" toml:"grpc,omitempty" yaml:"grpc,omitempty" label:"allowEmpty" file:"allowEmpty" export:"true"`
-	HTTP *OTelHTTP `description:"HTTP configuration for the OpenTelemetry collector." json:"http,omitempty" toml:"http,omitempty" yaml:"http,omitempty" label:"allowEmpty" file:"allowEmpty" export:"true"`
+	GRPC    *OTelGRPC    `description:"gRPC configuration for the OpenTelemetry collector." json:"grpc,omitempty" toml:"grpc,omitempty" yaml:"grpc,omitempty" label:"allowEmpty" file:"allowEmpty" export:"true"`
+	HTTP    *OTelHTTP    `description:"HTTP configuration for the OpenTelemetry collector." json:"http,omitempty" toml:"http,omitempty" yaml:"http,omitempty" label:"allowEmpty" file:"allowEmpty" export:"true"`
+	Sampler *OTelSampler `description:"Sampler configuration for the OpenTelemetry tracer." json:"sampler,omitempty" toml:"sampler,omitempty" yaml:"sampler,omitempty" label:"allowEmpty" file:"allowEmpty" export:"true"`
 }
 
 // SetDefaults sets the default values.
 func (c *OTelTracing) SetDefaults() {
 	c.HTTP = &OTelHTTP{}
 	c.HTTP.SetDefaults()
+	c.Sampler = &OTelSampler{}
+	c.Sampler.SetDefaults()
 }
 
 // Setup sets up the tracer.
@@ -48,6 +51,19 @@ func (c *OTelTracing) Setup(serviceName string, sampleRate float64, globalAttrib
 	}
 	if err != nil {
 		return nil, nil, fmt.Errorf("setting up exporter: %w", err)
+	}
+
+	if c.Sampler == nil {
+		c.Sampler = &OTelSampler{}
+		c.Sampler.SetDefaults()
+	}
+	// To accommodate potential future changes, add a sampleRate value to the arguments used in OpenTelemetry.
+	if c.Sampler.Arguments == "" {
+		c.Sampler.Arguments = fmt.Sprintf("%f", sampleRate)
+	}
+	sampler, err := c.Sampler.setupSampler()
+	if err != nil {
+		return nil, nil, fmt.Errorf("setting up sampler: %w", err)
 	}
 
 	attr := []attribute.KeyValue{
@@ -74,7 +90,7 @@ func (c *OTelTracing) Setup(serviceName string, sampleRate float64, globalAttrib
 	// span processor to aggregate spans before export.
 	bsp := sdktrace.NewBatchSpanProcessor(exporter)
 	tracerProvider := sdktrace.NewTracerProvider(
-		sdktrace.WithSampler(sdktrace.TraceIDRatioBased(sampleRate)),
+		sdktrace.WithSampler(sampler),
 		sdktrace.WithResource(res),
 		sdktrace.WithSpanProcessor(bsp),
 	)
